@@ -55,6 +55,10 @@ end
 -- Tracked currencies (we'll track changes between updates)
 local previousCurrencies = {}
 
+-- Faction standings cache for UPDATE_FACTION state tracking
+local cachedFactionStandings = {}
+local factionCacheInitialized = false
+
 -- Main frame
 local mainFrame
 local entries = {}
@@ -80,14 +84,14 @@ local function CreateEntryRow(parent)
     
     -- Main text (item name / currency name / rep name)
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.text:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 8, -4)
+    row.text:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 8, -2)
     row.text:SetPoint("RIGHT", row, "RIGHT", -80, 0)
     row.text:SetJustifyH("LEFT")
     row.text:SetWordWrap(false)
     
     -- Subtext (ilvl, stats, progress)
     row.subtext = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.subtext:SetPoint("TOPLEFT", row.text, "BOTTOMLEFT", 0, -2)
+    row.subtext:SetPoint("BOTTOMLEFT", row.icon, "BOTTOMRIGHT", 8, 2)
     row.subtext:SetPoint("RIGHT", row, "RIGHT", -80, 0)
     row.subtext:SetJustifyH("LEFT")
     row.subtext:SetWordWrap(false)
@@ -165,6 +169,15 @@ local function FormatMoneyCompact(copper)
     local copperRemain = copper % 100
     
     return string.format("|cffffd700%dg|r |cffc0c0c0%ds|r |cffeda55f%dc|r", gold, silver, copperRemain)
+end
+
+-- Format compact money with a single tint color (for AH prices)
+local function FormatMoneyTinted(copper, color)
+    local gold = floor(copper / 10000)
+    local silver = floor((copper % 10000) / 100)
+    local copperRemain = copper % 100
+    
+    return string.format("|cff%s%dg %ds %dc|r", color, gold, silver, copperRemain)
 end
 
 -- Format compact money (short version for AH price)
@@ -311,7 +324,7 @@ local function AddEntry(entryType, data)
                 local ahPrice, ahSource = GetAuctionPrice(itemLink)
                 if ahPrice and ahPrice > 0 then
                     local totalAH = ahPrice * data.quantity
-                    table.insert(priceLines, "|cff00ffff" .. FormatMoneyCompact(totalAH) .. "|r")
+                    table.insert(priceLines, FormatMoneyTinted(totalAH, "5ce1e6"))
                 end
             end
             
@@ -343,7 +356,7 @@ local function AddEntry(entryType, data)
                         if addon.db.lootMonitorShowAHPrice then
                             local ahPrice2 = GetAuctionPrice(link2)
                             if ahPrice2 and ahPrice2 > 0 then
-                                table.insert(priceLines, "|cff00ffff" .. FormatMoneyCompact(ahPrice2 * data.quantity) .. "|r")
+                                table.insert(priceLines, FormatMoneyTinted(ahPrice2 * data.quantity, "5ce1e6"))
                             end
                         end
                         row.rightText:SetText(table.concat(priceLines, "\n"))
@@ -621,42 +634,66 @@ local function OnEvent(self, event, ...)
             AddEntry("currency", { currencyID = currencyID, quantity = quantityChange })
         end
         
-    elseif event == "COMBAT_TEXT_UPDATE" then
-        local messageType, factionName, amount = ...
-        if messageType == "FACTION" and factionName and amount then
-            -- Get faction info
-            local factionID
-            for i = 1, GetNumFactions() do
-                local name, _, _, _, _, _, _, _, _, _, _, _, _, id = GetFactionInfo(i)
-                if name == factionName then
-                    factionID = id
-                    break
-                end
-            end
-            
-            local current, max
-            if factionID then
-                local factionData = C_Reputation.GetFactionDataByID(factionID)
-                if factionData then
-                    current = factionData.currentReactionThreshold and 
-                              (factionData.currentStanding - factionData.currentReactionThreshold) or factionData.currentStanding
-                    max = factionData.nextReactionThreshold and 
-                          (factionData.nextReactionThreshold - factionData.currentReactionThreshold) or nil
-                end
-            end
-            
-            AddEntry("reputation", {
-                factionName = factionName,
-                amount = amount,
-                current = current,
-                max = max,
-                icon = nil -- Could look up faction icon if desired
-            })
+    elseif event == "UPDATE_FACTION" then
+        -- State tracking approach: compare current standings to cached values
+        if not factionCacheInitialized then
+            -- Initialize cache on first UPDATE_FACTION if not already done
+            LootMonitorModule:CacheFactionStandings()
+            return
         end
         
-    elseif event == "UPDATE_FACTION" then
-        -- Could be used for tracking all rep changes
+        -- Iterate through all factions and check for changes
+        for i = 1, C_Reputation.GetNumFactions() do
+            local factionData = C_Reputation.GetFactionDataByIndex(i)
+            if factionData and factionData.factionID and not factionData.isHeader then
+                local factionID = factionData.factionID
+                local currentStanding = factionData.currentStanding
+                local cachedStanding = cachedFactionStandings[factionID]
+                
+                if cachedStanding and currentStanding ~= cachedStanding then
+                    local change = currentStanding - cachedStanding
+                    
+                    -- Calculate progress within current tier
+                    local current, max
+                    if factionData.currentReactionThreshold then
+                        current = currentStanding - factionData.currentReactionThreshold
+                    else
+                        current = currentStanding
+                    end
+                    if factionData.nextReactionThreshold and factionData.currentReactionThreshold then
+                        max = factionData.nextReactionThreshold - factionData.currentReactionThreshold
+                    end
+                    
+                    AddEntry("reputation", {
+                        factionName = factionData.name,
+                        amount = change,
+                        current = current,
+                        max = max,
+                        icon = nil
+                    })
+                end
+                
+                -- Update cache with new value
+                cachedFactionStandings[factionID] = currentStanding
+            end
+        end
+        
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Initialize faction cache on login/reload
+        LootMonitorModule:CacheFactionStandings()
     end
+end
+
+-- Cache all faction standings for state comparison
+function LootMonitorModule:CacheFactionStandings()
+    cachedFactionStandings = {}
+    for i = 1, C_Reputation.GetNumFactions() do
+        local factionData = C_Reputation.GetFactionDataByIndex(i)
+        if factionData and factionData.factionID and not factionData.isHeader then
+            cachedFactionStandings[factionData.factionID] = factionData.currentStanding
+        end
+    end
+    factionCacheInitialized = true
 end
 
 function LootMonitorModule:OnInitialize()
@@ -667,7 +704,8 @@ function LootMonitorModule:OnInitialize()
     eventFrame:RegisterEvent("CHAT_MSG_LOOT")
     eventFrame:RegisterEvent("CHAT_MSG_MONEY")
     eventFrame:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
-    eventFrame:RegisterEvent("COMBAT_TEXT_UPDATE")
+    eventFrame:RegisterEvent("UPDATE_FACTION")
+    eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     eventFrame:SetScript("OnEvent", OnEvent)
     
     -- Start fade timer (faster tick for smooth animation)
