@@ -80,7 +80,7 @@ local function CreateEntryRow(parent)
     
     -- Main text (item name / currency name / rep name)
     row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.text:SetPoint("TOPLEFT", row.icon, "TOPRIGHT", 8, -2)
+    row.text:SetPoint("LEFT", row.icon, "RIGHT", 8, 0) -- Centered by default
     row.text:SetPoint("RIGHT", row, "RIGHT", -80, 0)
     row.text:SetJustifyH("LEFT")
     row.text:SetWordWrap(false)
@@ -91,6 +91,20 @@ local function CreateEntryRow(parent)
     row.subtext:SetPoint("RIGHT", row, "RIGHT", -80, 0)
     row.subtext:SetJustifyH("LEFT")
     row.subtext:SetWordWrap(false)
+    
+    -- Helper function to update text layout based on whether subtext exists
+    row.UpdateTextLayout = function(self)
+        self.text:ClearAllPoints()
+        if self.subtext:GetText() and self.subtext:GetText() ~= "" then
+            -- Dual line: text at top, subtext at bottom
+            self.text:SetPoint("TOPLEFT", self.icon, "TOPRIGHT", 8, -2)
+            self.text:SetPoint("RIGHT", self, "RIGHT", -80, 0)
+        else
+            -- Single line: center vertically
+            self.text:SetPoint("LEFT", self.icon, "RIGHT", 8, 0)
+            self.text:SetPoint("RIGHT", self, "RIGHT", -80, 0)
+        end
+    end
     
     -- Right text (price / quantity)
     row.rightText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -305,6 +319,7 @@ local function AddEntry(entryType, data)
             end
             
             row.subtext:SetText(table.concat(subParts, " "))
+            row:UpdateTextLayout()
             
             -- Build price display (vendor + AH)
             local priceLines = {}
@@ -343,6 +358,7 @@ local function AddEntry(entryType, data)
                             table.insert(sub, "|cffffcc00ilvl: " .. ilvl2 .. "|r")
                         end
                         row.subtext:SetText(table.concat(sub, " "))
+                        row:UpdateTextLayout()
                         
                         -- Build price display (vendor + AH)
                         local priceLines = {}
@@ -365,6 +381,7 @@ local function AddEntry(entryType, data)
             row.text:SetText(data.itemLink)
             row.subtext:SetText("")
             row.rightText:SetText("")
+            row:UpdateTextLayout()
         end
         
     elseif entryType == "money" then
@@ -372,6 +389,7 @@ local function AddEntry(entryType, data)
         row.text:SetText("|cffffd700Money|r")
         row.subtext:SetText("")
         row.rightText:SetText(FormatMoneyCompact(data.amount))
+        row:UpdateTextLayout()
         row.itemLink = nil
         
     elseif entryType == "currency" then
@@ -391,6 +409,7 @@ local function AddEntry(entryType, data)
                 progressText = string.format("(|cffffff00%d|r)", currencyInfo.quantity)
             end
             row.subtext:SetText(progressText)
+            row:UpdateTextLayout()
             row.rightText:SetText("")
         end
         row.itemLink = nil
@@ -408,6 +427,7 @@ local function AddEntry(entryType, data)
         else
             row.subtext:SetText("")
         end
+        row:UpdateTextLayout()
         row.rightText:SetText("")
         row.itemLink = nil
     end
