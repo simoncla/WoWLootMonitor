@@ -1,0 +1,12 @@
+## Interface: 110100, 110105
+## Title: Loot Monitor
+## Notes: Visual feed of looted items, currency, reputation, and gold gains
+## Author: Your Name
+## Version: 1.0.0
+## SavedVariables: LootMonitorDB
+## IconTexture: Interface\Icons\INV_Misc_Bag_10_Green
+
+# Core files
+Core.lua
+LootMonitor.lua
+Config.lua
