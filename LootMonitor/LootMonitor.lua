@@ -55,10 +55,6 @@ end
 -- Tracked currencies (we'll track changes between updates)
 local previousCurrencies = {}
 
--- Faction standings cache for UPDATE_FACTION state tracking
-local cachedFactionStandings = {}
-local factionCacheInitialized = false
-
 -- Main frame
 local mainFrame
 local entries = {}
@@ -634,66 +630,58 @@ local function OnEvent(self, event, ...)
             AddEntry("currency", { currencyID = currencyID, quantity = quantityChange })
         end
         
-    elseif event == "UPDATE_FACTION" then
-        -- State tracking approach: compare current standings to cached values
-        if not factionCacheInitialized then
-            -- Initialize cache on first UPDATE_FACTION if not already done
-            LootMonitorModule:CacheFactionStandings()
-            return
-        end
+    elseif event == "CHAT_MSG_COMBAT_FACTION_CHANGE" then
+        -- Parse the reputation message directly from chat
+        -- This works for all reputation types including Warband reputations
+        local msg = ...
+        local factionName, amount = LootMonitorModule:ParseReputationMessage(msg)
         
-        -- Iterate through all factions and check for changes
-        for i = 1, C_Reputation.GetNumFactions() do
-            local factionData = C_Reputation.GetFactionDataByIndex(i)
-            if factionData and factionData.factionID and not factionData.isHeader then
-                local factionID = factionData.factionID
-                local currentStanding = factionData.currentStanding
-                local cachedStanding = cachedFactionStandings[factionID]
-                
-                if cachedStanding and currentStanding ~= cachedStanding then
-                    local change = currentStanding - cachedStanding
-                    
-                    -- Calculate progress within current tier
-                    local current, max
-                    if factionData.currentReactionThreshold then
-                        current = currentStanding - factionData.currentReactionThreshold
-                    else
-                        current = currentStanding
-                    end
-                    if factionData.nextReactionThreshold and factionData.currentReactionThreshold then
-                        max = factionData.nextReactionThreshold - factionData.currentReactionThreshold
-                    end
-                    
-                    AddEntry("reputation", {
-                        factionName = factionData.name,
-                        amount = change,
-                        current = current,
-                        max = max,
-                        icon = nil
-                    })
-                end
-                
-                -- Update cache with new value
-                cachedFactionStandings[factionID] = currentStanding
-            end
+        if factionName and amount and amount ~= 0 then
+            AddEntry("reputation", {
+                factionName = factionName,
+                amount = amount,
+                current = nil,
+                max = nil,
+                icon = nil
+            })
         end
-        
-    elseif event == "PLAYER_ENTERING_WORLD" then
-        -- Initialize faction cache on login/reload
-        LootMonitorModule:CacheFactionStandings()
     end
 end
 
--- Cache all faction standings for state comparison
-function LootMonitorModule:CacheFactionStandings()
-    cachedFactionStandings = {}
-    for i = 1, C_Reputation.GetNumFactions() do
-        local factionData = C_Reputation.GetFactionDataByIndex(i)
-        if factionData and factionData.factionID and not factionData.isHeader then
-            cachedFactionStandings[factionData.factionID] = factionData.currentStanding
-        end
+-- Parse reputation gain/loss message from CHAT_MSG_COMBAT_FACTION_CHANGE
+-- Handles formats like:
+-- "Your reputation with FACTION has increased by AMOUNT."
+-- "Your Warband's reputation with FACTION increased by AMOUNT."
+-- "Reputation with FACTION increased by AMOUNT."
+function LootMonitorModule:ParseReputationMessage(msg)
+    if not msg then return nil, nil end
+    
+    -- Pattern to extract faction name and amount
+    -- Try "increased by X" pattern first
+    local factionName, amount = msg:match("reputation with (.+) .-increased.-by (%d+)")
+    if factionName and amount then
+        return factionName, tonumber(amount)
     end
-    factionCacheInitialized = true
+    
+    -- Try "decreased by X" pattern
+    factionName, amount = msg:match("reputation with (.+) .-decreased.-by (%d+)")
+    if factionName and amount then
+        return factionName, -tonumber(amount)
+    end
+    
+    -- Fallback: Try simpler patterns for different message formats
+    -- "Reputation with FACTION increased/decreased by AMOUNT"
+    factionName, amount = msg:match("[Rr]eputation with ([^%d]+) increased by (%d+)")
+    if factionName and amount then
+        return factionName:gsub("%s+$", ""), tonumber(amount) -- Trim trailing spaces
+    end
+    
+    factionName, amount = msg:match("[Rr]eputation with ([^%d]+) decreased by (%d+)")
+    if factionName and amount then
+        return factionName:gsub("%s+$", ""), -tonumber(amount)
+    end
+    
+    return nil, nil
 end
 
 function LootMonitorModule:OnInitialize()
@@ -704,8 +692,7 @@ function LootMonitorModule:OnInitialize()
     eventFrame:RegisterEvent("CHAT_MSG_LOOT")
     eventFrame:RegisterEvent("CHAT_MSG_MONEY")
     eventFrame:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
-    eventFrame:RegisterEvent("UPDATE_FACTION")
-    eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    eventFrame:RegisterEvent("CHAT_MSG_COMBAT_FACTION_CHANGE")
     eventFrame:SetScript("OnEvent", OnEvent)
     
     -- Start fade timer (faster tick for smooth animation)
