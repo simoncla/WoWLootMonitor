@@ -1,6 +1,10 @@
 ---@class LootMonitor
 local addonName, addon = ...
 
+-- Localize frequently used functions
+local floor = math.floor
+local abs = math.abs
+
 local Config = {}
 
 -- Configuration options
@@ -254,7 +258,7 @@ local function PopulateOptions(frame)
             valueText:SetText(string.format("%.1fs", addon.db[option.key] or 0.5))
             
             slider:SetScript("OnValueChanged", function(self, value)
-                value = math.floor(value * 10 + 0.5) / 10 -- Round to 1 decimal
+                value = floor(value * 10 + 0.5) / 10 -- Round to 1 decimal
                 addon.db[option.key] = value
                 valueText:SetText(string.format("%.1fs", value))
             end)
@@ -269,7 +273,7 @@ local function PopulateOptions(frame)
     end
     
     -- Update scroll child height
-    scrollChild:SetHeight(math.abs(yOffset) + 20)
+    scrollChild:SetHeight(abs(yOffset) + 20)
 end
 
 function Config:Toggle()

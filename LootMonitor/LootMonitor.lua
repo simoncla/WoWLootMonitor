@@ -1,6 +1,9 @@
 ---@class LootMonitor
 local addonName, addon = ...
 
+-- Localize frequently used functions
+local floor = math.floor
+
 local LootMonitorModule = {}
 
 -- Constants
